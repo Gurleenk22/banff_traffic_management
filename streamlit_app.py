@@ -11,10 +11,10 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from openai import OpenAI
 import os
-from datetime import datetime, time, date
+from datetime import time, date
 
 # ---------------------------------------------------
-# BASIC PAGE CONFIG + GLASSY CSS
+# BASIC PAGE CONFIG + SIMPLE LIGHT THEME
 # ---------------------------------------------------
 st.set_page_config(
     page_title="Path Finders – Banff Parking",
@@ -24,101 +24,100 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-        /* background */
+        /* light background, centered content */
         .stApp {
-            background: radial-gradient(circle at top left, #1e293b 0, #020617 45%, #020617 100%);
-            color: #e5e7eb;
+            background: #f3f4f6;
+            color: #111827;
         }
         .block-container {
-            padding-top: 1.2rem;
+            max-width: 1150px;
+            padding-top: 1.5rem;
+            padding-bottom: 2rem;
+            margin: 0 auto;
         }
 
-        .app-header {
-            font-size: 2.0rem;
+        /* HERO */
+        .hero-wrapper {
+            text-align: center;
+            margin-bottom: 1.4rem;
+        }
+        .app-title {
+            font-size: 2.1rem;
             font-weight: 800;
-            letter-spacing: 0.03em;
+            letter-spacing: 0.04em;
+            color: #111827;
         }
         .app-subtitle {
-            color: #9ca3af;
-            font-size: 0.95rem;
-            margin-top: 0.2rem;
-        }
-
-        .hero {
-            display: flex;
-            gap: 1.5rem;
-            align-items: center;
-            margin-bottom: 1.2rem;
-        }
-        .hero-left {
-            flex: 2;
-        }
-        .hero-right {
-            flex: 1;
-            display: flex;
-            justify-content: flex-end;
+            color: #4b5563;
+            font-size: 0.98rem;
+            margin-top: 0.25rem;
         }
         .hero-pill-row {
-            margin-top: 0.6rem;
+            margin-top: 0.7rem;
             display: flex;
+            justify-content: center;
             gap: 0.5rem;
             flex-wrap: wrap;
         }
         .hero-pill {
-            padding: 0.3rem 0.7rem;
+            padding: 0.25rem 0.85rem;
             border-radius: 999px;
-            font-size: 0.75rem;
-            background: rgba(15, 23, 42, 0.8);
-            border: 1px solid rgba(148, 163, 184, 0.3);
-        }
-        .hero-highlight {
-            padding: 0.9rem 1.1rem;
-            border-radius: 1rem;
-            background: linear-gradient(135deg, rgba(59,130,246,0.18), rgba(16,185,129,0.16));
-            border: 1px solid rgba(148, 163, 184, 0.4);
-            font-size: 0.85rem;
+            font-size: 0.78rem;
+            background: #e5f3ff;
+            color: #1e40af;
+            border: 1px solid #bfdbfe;
         }
 
+        .hero-banner {
+            margin: 0.9rem auto 0;
+            max-width: 520px;
+            padding: 0.9rem 1.1rem;
+            border-radius: 1rem;
+            background: linear-gradient(135deg, #d1fae5, #bfdbfe);
+            border: 1px solid #93c5fd;
+            font-size: 0.9rem;
+            color: #064e3b;
+        }
+
+        /* Cards & metrics */
         .glass-card {
             padding: 1rem 1.25rem;
             border-radius: 1rem;
-            background: rgba(15, 23, 42, 0.72);
-            border: 1px solid rgba(148, 163, 184, 0.45);
-            box-shadow: 0 18px 40px rgba(15, 23, 42, 0.45);
-            backdrop-filter: blur(18px);
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
+            box-shadow: 0 8px 20px rgba(148, 163, 184, 0.25);
         }
         .card {
-            padding: 0.9rem 1rem;
+            padding: 0.8rem 1rem;
             border-radius: 0.9rem;
-            background: rgba(15, 23, 42, 0.8);
-            border: 1px solid rgba(148, 163, 184, 0.4);
-            backdrop-filter: blur(18px);
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
         }
         .section-title {
             font-weight: 600;
-            margin-bottom: 0.25rem;
-            font-size: 0.85rem;
+            margin-bottom: 0.2rem;
+            font-size: 0.8rem;
             text-transform: uppercase;
-            letter-spacing: 0.04em;
-            color: #9ca3af;
+            letter-spacing: 0.08em;
+            color: #6b7280;
         }
 
-        /* make metrics look a bit glassy */
         .stMetric {
-            background: rgba(15, 23, 42, 0.8);
+            background: #ffffff;
             border-radius: 0.9rem;
-            padding: 0.6rem 0.8rem;
-            border: 1px solid rgba(148, 163, 184, 0.4);
+            padding: 0.65rem 0.75rem;
+            border: 1px solid #e5e7eb;
         }
 
-        /* tab labels a bit bolder */
+        /* tabs */
         button[role="tab"] {
             border-radius: 999px !important;
-            padding: 0.35rem 1rem !important;
+            padding: 0.3rem 1.1rem !important;
             border: 1px solid transparent !important;
+            font-size: 0.86rem !important;
         }
         button[role="tab"][aria-selected="true"] {
-            background: linear-gradient(135deg, #22c55e, #3b82f6);
+            background: #2563eb !important;
             color: white !important;
         }
     </style>
@@ -206,7 +205,6 @@ def generate_chat_answer(user_question, chat_history):
     docs, vectorizer, doc_embeddings = load_rag_knowledge()
     context = retrieve_context(user_question, docs, vectorizer, doc_embeddings, k=5)
 
-    # --- Offline mode (no key) ---
     if client is None:
         return (
             "🚫 Chat is running in offline mode (no OpenAI API key is set).\n\n"
@@ -214,15 +212,13 @@ def generate_chat_answer(user_question, chat_history):
             f"{context}"
         )
 
-    # --- Online mode ---
     messages = [
         {
             "role": "system",
             "content": (
                 "You are a friendly project assistant helping Gurleen explain a Banff "
-                "parking analytics project. Speak clearly and simply for classmates and "
-                "instructors who are not data scientists. Use the provided Context as "
-                "your main source of truth."
+                "parking analytics project. Speak clearly and simply. Use the provided "
+                "Context as your main source of truth."
             ),
         },
         {"role": "system", "content": f"Context from project notes:\n{context}"},
@@ -248,7 +244,7 @@ def generate_chat_answer(user_question, chat_history):
         )
 
 # ---------------------------------------------------
-# SMALL HELPERS
+# SMALL HELPER
 # ---------------------------------------------------
 def get_time_features_from_inputs(selected_date: date, selected_time: time):
     month = selected_date.month
@@ -258,41 +254,38 @@ def get_time_features_from_inputs(selected_date: date, selected_time: time):
     return month, day_of_week, hour, is_weekend
 
 # ---------------------------------------------------
-# TOP HERO HEADER
+# HERO HEADER – CENTERED
 # ---------------------------------------------------
 st.markdown(
     """
-    <div class="hero">
-      <div class="hero-left">
-        <div class="app-header">Path Finders</div>
-        <div class="app-subtitle">Smart parking insights for Banff townsite.</div>
+    <div class="hero-wrapper">
+        <div class="app-title">Path Finders</div>
+        <div class="app-subtitle">
+            Banff parking insights with machine learning and explainable AI.
+        </div>
         <div class="hero-pill-row">
-          <div class="hero-pill">🚗 Parking demand</div>
-          <div class="hero-pill">📊 Lot comparison</div>
-          <div class="hero-pill">🔍 Explainable AI</div>
-          <div class="hero-pill">💬 RAG assistant</div>
+            <div class="hero-pill">🚗 Demand prediction</div>
+            <div class="hero-pill">📊 Lot overview</div>
+            <div class="hero-pill">🔍 SHAP & PDP</div>
+            <div class="hero-pill">💬 Project assistant</div>
         </div>
-      </div>
-      <div class="hero-right">
-        <div class="hero-highlight">
-          <b>Live scenario sandbox</b><br/>
-          Pick a date, time and lot → get instant occupancy prediction.
+        <div class="hero-banner">
+            Pick a date, time and lot – the app predicts occupancy and full-lot risk in seconds.
         </div>
-      </div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
 # ---------------------------------------------------
-# HORIZONTAL NAV – TABS (no sidebar pages)
+# HORIZONTAL TABS
 # ---------------------------------------------------
 tab_overview, tab_predict, tab_lots, tab_xai, tab_chat = st.tabs(
     ["🏠 Overview", "🎯 Predict", "📊 Lots", "🔍 XAI", "💬 Chat"]
 )
 
 # ---------------------------------------------------
-# TAB 1 – OVERVIEW + DASHBOARD FROM CSV
+# TAB 1 – OVERVIEW + DASHBOARD
 # ---------------------------------------------------
 with tab_overview:
     df_dash = load_dashboard_data()
@@ -334,7 +327,7 @@ with tab_overview:
                     f"""
                     <div class="card">
                         <div class="section-title">Date range</div>
-                        <div style="font-size:0.9rem;">{date_min} →<br/>{date_max}</div>
+                        <div style="font-size:0.9rem;">{date_min} → {date_max}</div>
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -344,7 +337,7 @@ with tab_overview:
 
     with col_top_right:
         today = date.today()
-        selected_date = st.date_input("Date", value=today)
+        selected_date = st.date_input("Overview date", value=today)
 
         st.markdown(
             f"""
@@ -353,7 +346,7 @@ with tab_overview:
                 <div style="font-size:1.1rem;">
                     {selected_date.strftime('%b %d, %Y')}
                 </div>
-                <div style="color:#9ca3af;font-size:0.85rem;">
+                <div style="color:#6b7280;font-size:0.85rem;">
                     {selected_date.strftime('%A')}
                 </div>
             </div>
@@ -375,7 +368,6 @@ with tab_overview:
             if lot_choice != "All lots":
                 day_df = day_df[day_df["Unit"] == lot_choice]
 
-            # KPIs
             avg_occ = day_df["Percent_Occupancy"].mean()
             peak_occ = day_df["Percent_Occupancy"].max()
             full_hours = int(day_df["Is_Full"].sum())
@@ -390,7 +382,7 @@ with tab_overview:
             with k4:
                 st.metric("Rows", f"{len(day_df)}")
 
-            # Hourly line chart – smaller height
+            # Smaller line chart
             hourly = (
                 day_df.groupby("Hour")["Percent_Occupancy"]
                 .mean()
@@ -408,7 +400,7 @@ with tab_overview:
             st.caption("Average occupancy by hour for the selected date and lot filter.")
 
 # ---------------------------------------------------
-# TAB 2 – PREDICTION (calendar + time input)
+# TAB 2 – PREDICTION
 # ---------------------------------------------------
 with tab_predict:
     st.markdown("#### Scenario prediction")
@@ -416,19 +408,16 @@ with tab_predict:
     col_left, col_right = st.columns([1.2, 1])
 
     with col_left:
-        st.markdown("**When?**")
         pred_date = st.date_input("Prediction date", value=date.today(), key="pred_date")
         pred_time = st.time_input("Prediction time", value=time(13, 0), key="pred_time")
 
     with col_right:
-        st.markdown("**Weather**")
         max_temp = st.slider("Max temp (°C)", -20.0, 40.0, 22.0, key="pred_temp")
         total_precip = st.slider("Total precip (mm)", 0.0, 30.0, 0.5, key="pred_precip")
         wind_gust = st.slider("Max gust (km/h)", 0.0, 100.0, 12.0, key="pred_gust")
 
     month, day_of_week, hour, is_weekend = get_time_features_from_inputs(pred_date, pred_time)
 
-    # Lot selection
     lot_features = [f for f in FEATURES if f.startswith("Unit_")]
     lot_display_names = [lf.replace("Unit_", "").replace("_", " ") for lf in lot_features]
 
@@ -454,14 +443,13 @@ with tab_predict:
         st.markdown(
             """
             <div class="card">
-                <div class="section-title">Tip</div>
-                <div>Pick a date, time, lot and weather, then click <b>Predict</b>.</div>
+                <div class="section-title">How to use</div>
+                <div>Choose date, time, lot and weather then press <b>Predict</b>.</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-    # Build feature dict
     base_input = {f: 0 for f in FEATURES}
     if "Month" in base_input:
         base_input["Month"] = month
@@ -582,11 +570,11 @@ with tab_lots:
 
             def lot_status_row_style(row):
                 if "High risk" in row["Status"]:
-                    return ["background-color: #451a1a"] * len(row)
+                    return ["background-color: #fee2e2"] * len(row)
                 elif "Busy" in row["Status"]:
-                    return ["background-color: #422006"] * len(row)
+                    return ["background-color: #ffedd5"] * len(row)
                 else:
-                    return ["background-color: #064e3b"] * len(row)
+                    return ["background-color: #dcfce7"] * len(row)
 
             styled_df = (
                 df.style
@@ -605,7 +593,6 @@ with tab_lots:
 with tab_xai:
     st.markdown("#### Explainable AI views")
 
-    # SHAP
     st.markdown("**SHAP summary (regression)**")
     try:
         explainer_reg = shap.TreeExplainer(best_xgb_reg)
@@ -618,7 +605,7 @@ with tab_xai:
             show=False,
         )
         fig1 = plt.gcf()
-        fig1.set_size_inches(7, 3)   # smaller
+        fig1.set_size_inches(7, 3)
         fig1.tight_layout()
         st.pyplot(fig1)
 
@@ -637,7 +624,6 @@ with tab_xai:
     except Exception as e:
         st.error(f"Could not generate SHAP plots: {e}")
 
-    # PDP
     st.markdown("**Partial dependence plots**")
     pd_feature_names = [name for name in ["Max Temp (°C)", "Month", "Hour"] if name in FEATURES]
     if pd_feature_names:
@@ -655,7 +641,6 @@ with tab_xai:
     else:
         st.info("Configured PDP features not found in FEATURES; adjust names if needed.")
 
-    # Residuals
     st.markdown("**Residual plot**")
     try:
         y_pred = best_xgb_reg.predict(X_test_scaled)
