@@ -11,16 +11,52 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from openai import OpenAI
 import os
-
-client = OpenAI()  # uses OPENAI_API_KEY from env / Streamlit secrets
+from datetime import datetime, time, date
 
 # ---------------------------------------------------
-# BASIC PAGE CONFIG
+# BASIC PAGE CONFIG + LIGHT CSS
 # ---------------------------------------------------
 st.set_page_config(
     page_title="Banff Parking – ML & XAI Dashboard",
     layout="wide"
 )
+
+st.markdown(
+    """
+    <style>
+        .main {
+            background-color: #f5f5f7;
+        }
+        .app-header {
+            font-size: 1.8rem;
+            font-weight: 700;
+            margin-bottom: 0.1rem;
+        }
+        .app-subtitle {
+            color: #6b7280;
+            font-size: 0.95rem;
+            margin-bottom: 1rem;
+        }
+        .card {
+            padding: 1rem 1.25rem;
+            border-radius: 1rem;
+            background-color: white;
+            box-shadow: 0 1px 4px rgba(15, 23, 42, 0.09);
+        }
+        .section-title {
+            font-weight: 600;
+            margin-bottom: 0.4rem;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ---------------------------------------------------
+# OPENAI CLIENT (SAFE OFFLINE MODE)
+# ---------------------------------------------------
+api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=api_key) if api_key else None
 
 # ---------------------------------------------------
 # LOAD MODELS + DATA (CACHED)
@@ -28,12 +64,11 @@ st.set_page_config(
 @st.cache_resource
 def load_models_and_data():
     """Load trained models, scaler, feature list, and test data."""
-    reg = joblib.load("banff_best_xgb_reg.pkl")      # XGBoost regressor
-    cls = joblib.load("banff_best_xgb_cls.pkl")      # XGBoost classifier
-    scaler = joblib.load("banff_scaler.pkl")         # Scaler used in training
-    features = joblib.load("banff_features.pkl")     # List of feature names
+    reg = joblib.load("banff_best_xgb_reg.pkl")
+    cls = joblib.load("banff_best_xgb_cls.pkl")
+    scaler = joblib.load("banff_scaler.pkl")
+    features = joblib.load("banff_features.pkl")
 
-    # Test data for XAI and residual analysis
     X_test_scaled = np.load("X_test_scaled.npy")
     y_reg_test = np.load("y_reg_test.npy")
 
@@ -42,21 +77,31 @@ def load_models_and_data():
 
 best_xgb_reg, best_xgb_cls, scaler, FEATURES, X_test_scaled, y_reg_test = load_models_and_data()
 
+# ===== Optional CSV for dashboard =====
+DASHBOARD_CSV = "banff_dashboard.csv"
+
+
+@st.cache_data
+def load_dashboard_data():
+    if os.path.exists(DASHBOARD_CSV):
+        try:
+            return pd.read_csv(DASHBOARD_CSV)
+        except Exception:
+            return None
+    return None
+
 # ---------------------------------------------------
 # RAG: LOAD KNOWLEDGE + BUILD VECTORIZER
 # ---------------------------------------------------
 @st.cache_resource
 def load_rag_knowledge():
-    """
-    Loads banff_knowledge.txt and builds TF-IDF vectors.
-    Each non-empty line is treated as a small document.
-    """
+    """Loads banff_knowledge.txt and builds TF-IDF vectors."""
     knowledge_path = "banff_knowledge.txt"
 
     if not os.path.exists(knowledge_path):
         docs = [
-            "This is Gurleen's Banff parking assistant. The banff_knowledge.txt file is "
-            "missing, so answers are based only on general parking logic."
+            "This is Gurleen's Banff parking assistant. The banff_knowledge.txt file "
+            "is missing, so answers are based only on general parking logic."
         ]
     else:
         with open(knowledge_path, "r", encoding="utf-8") as f:
@@ -64,7 +109,6 @@ def load_rag_knowledge():
 
     vectorizer = TfidfVectorizer(stop_words="english")
     doc_embeddings = vectorizer.fit_transform(docs)
-
     return docs, vectorizer, doc_embeddings
 
 
@@ -74,49 +118,43 @@ def retrieve_context(query, docs, vectorizer, doc_embeddings, k=5):
     sims = cosine_similarity(query_vec, doc_embeddings).flatten()
     top_idx = sims.argsort()[::-1][:k]
     selected = [docs[i] for i in top_idx if sims[i] > 0.0]
-
     if not selected:
         return "No strong matches in the knowledge base. Answer based on general parking logic."
-
     return "\n".join(selected)
 
 
 def generate_chat_answer(user_question, chat_history):
     """
-    Calls OpenAI with retrieved context + short chat history.
-    If the API fails (e.g., insufficient_quota), fall back to
-    a simple answer built only from the retrieved context.
+    Calls OpenAI ONLY if an API key exists.
+    Otherwise, returns a fallback answer based only on retrieved context.
     """
     docs, vectorizer, doc_embeddings = load_rag_knowledge()
     context = retrieve_context(user_question, docs, vectorizer, doc_embeddings, k=5)
 
+    # --- Offline mode (no key) ---
+    if client is None:
+        return (
+            "🚫 Chat is running in offline mode (no OpenAI API key is set).\n\n"
+            "Here is the most relevant information from the Banff project notes:\n\n"
+            f"{context}"
+        )
+
+    # --- Online mode ---
     messages = [
         {
             "role": "system",
             "content": (
                 "You are a friendly project assistant helping Gurleen explain a Banff "
-                "parking analytics project. Speak clearly and simply, as if you are "
-                "presenting to classmates and instructors who are not data scientists. "
-                "Use the provided 'Context' from the project notes as your main source "
-                "of truth. If the context does not clearly contain the answer, say that "
-                "openly and give a short, reasonable guess based on typical parking "
-                "behaviour."
+                "parking analytics project. Speak clearly and simply for classmates and "
+                "instructors who are not data scientists. Use the provided Context as "
+                "your main source of truth."
             ),
         },
-        {
-            "role": "system",
-            "content": f"Context from project notes:\n{context}",
-        },
+        {"role": "system", "content": f"Context from project notes:\n{context}"},
     ]
 
-    # keep last few turns of history
     for h in chat_history[-4:]:
-        messages.append(
-            {
-                "role": h["role"],
-                "content": h["content"],
-            }
-        )
+        messages.append({"role": h["role"], "content": h["content"]})
 
     messages.append({"role": "user", "content": user_question})
 
@@ -128,241 +166,168 @@ def generate_chat_answer(user_question, chat_history):
         )
         return response.choices[0].message.content.strip()
     except Exception:
-        # Friendly fallback when quota is exhausted or API not reachable
         return (
-            "I couldn’t contact the language-model service right now "
-            "(this usually means the OpenAI API quota or free credits are used up "
-            "for this key).\n\n"
-            "Here is the most relevant information I can give based only on "
-            "the project notes:\n\n"
+            "⚠️ I could not contact the language model service right now.\n\n"
+            "Here is the most relevant information from your notes:\n\n"
             f"{context}"
         )
 
 # ---------------------------------------------------
-# SIDEBAR NAVIGATION
+# TOP HEADER
 # ---------------------------------------------------
-st.sidebar.title("Banff Parking Dashboard")
-st.sidebar.markdown(
-    """
-    Use this app to:
-    - Explore hourly parking demand
-    - Check which lots may be full
-    - Understand the model using XAI
-    - Chat with a **parking assistant** using RAG
-    """
-)
-
-page = st.sidebar.radio(
-    "Go to",
-    [
-        "Overview",
-        "Make Prediction",
-        "Lot Status Overview",
-        "XAI – Explainable AI",
-        "💬 Chat Assistant (RAG)",
-    ]
+st.markdown('<div class="app-header">Banff Parking Dashboard</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="app-subtitle">Quick insights, predictions, and explainability for Banff lots.</div>',
+    unsafe_allow_html=True,
 )
 
 # ---------------------------------------------------
-# PAGE 1 – OVERVIEW
+# HORIZONTAL NAV – TABS (no sidebar pages)
 # ---------------------------------------------------
-if page == "Overview":
-    st.title("🚗 Banff Parking Demand – Machine Learning Overview")
+tab_overview, tab_predict, tab_lots, tab_xai, tab_chat = st.tabs(
+    ["🏠 Overview", "🎯 Predict", "📊 Lots", "🔍 XAI", "💬 Chat"]
+)
 
-    col_left, col_right = st.columns([1.4, 1])
+# ---------------------------------------------------
+# TAB 1 – OVERVIEW + SIMPLE DASHBOARD
+# ---------------------------------------------------
+with tab_overview:
+    col_top_left, col_top_right = st.columns([2, 1])
 
-    with col_left:
+    with col_top_left:
+        st.markdown("### Dashboard snapshot")
+        st.caption("High-level view of current parking behaviour.")
+
+    with col_top_right:
+        today = date.today()
+        selected_date = st.date_input("Date", value=today, label_visibility="collapsed")
+
+        st.markdown(
+            f"""
+            <div class="card">
+                <div class="section-title">Selected date</div>
+                <div>{selected_date.strftime('%b %d, %Y')} ({selected_date.strftime('%A')})</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("")
+
+    # KPI cards row
+    kpi1, kpi2, kpi3 = st.columns(3)
+    with kpi1:
         st.markdown(
             """
-            ### Project Question
-
-            **How can Banff use real data to anticipate parking pressure and avoid full lots during the May–September tourist season?**
-
-            This project combines:
-
-            - **Parking management data** – when and where people park
-            - **Weather data** – temperature, rain, and wind
-            - **Engineered features** – hour, weekday/weekend, lagged occupancy, rolling averages
-
-            A Gradient-boosted tree model (**XGBoost**) predicts:
-            - Hourly **occupancy level** for each lot
-            - **Probability that a lot is near full** (> 90% capacity)
-            """
+            <div class="card">
+                <div class="section-title">Model targets</div>
+                <div>Hourly occupancy & full-lot risk</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
+    with kpi2:
+        st.markdown(
+            """
+            <div class="card">
+                <div class="section-title">Season focus</div>
+                <div>May – September (tourist season)</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with kpi3:
+        st.markdown(
+            """
+            <div class="card">
+                <div class="section-title">Lots modelled</div>
+                <div>Multiple Banff units</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("")
+    st.markdown("### CSV overview")
+
+    df_dash = load_dashboard_data()
+    if df_dash is None:
+        st.info(
+            f"Place a CSV named **{DASHBOARD_CSV}** in the app folder to feed this dashboard "
+            "with real metrics (e.g., daily occupancy, arrivals, departures)."
+        )
+    else:
+        # show a quick summary of the CSV
+        st.dataframe(df_dash.head(), use_container_width=True)
+        st.caption("Preview of your CSV. You can customise charts here if needed.")
+
+# ---------------------------------------------------
+# Helper: convert calendar date/time -> model inputs
+# ---------------------------------------------------
+def get_time_features_from_inputs(selected_date: date, selected_time: time):
+    month = selected_date.month
+    day_of_week = selected_date.weekday()  # 0=Monday
+    hour = selected_time.hour
+    is_weekend = 1 if day_of_week in [5, 6] else 0
+    return month, day_of_week, hour, is_weekend
+
+# ---------------------------------------------------
+# TAB 2 – PREDICTION (calendar instead of sliders)
+# ---------------------------------------------------
+with tab_predict:
+    st.markdown("### Scenario prediction")
+
+    col_left, col_right = st.columns([1.2, 1])
+
+    # date + time pickers
+    with col_left:
+        st.markdown("**When?**")
+        pred_date = st.date_input("Prediction date", value=date.today())
+        pred_time = st.time_input("Prediction time", value=time(13, 0))
 
     with col_right:
-        st.markdown("### Quick Facts (from engineered data)")
-        kpi1, kpi2 = st.columns(2)
-        with kpi1:
-            st.metric("Tourist season", "May–September 2025")
-        with kpi2:
-            st.metric("Lots modelled", "Multiple Banff units")
-        kpi3, kpi4 = st.columns(2)
-        with kpi3:
-            st.metric("Target 1", "Hourly occupancy")
-        with kpi4:
-            st.metric("Target 2", "Full / Not-full")
+        st.markdown("**Weather**")
+        max_temp = st.slider("Max temp (°C)", -20.0, 40.0, 22.0)
+        total_precip = st.slider("Total precip (mm)", 0.0, 30.0, 0.5)
+        wind_gust = st.slider("Max gust (km/h)", 0.0, 100.0, 12.0)
 
-        st.markdown(
-            """
-            ✅ Models trained on **historical hourly data**
-            ✅ Includes **time, weather, and history** features
-            ✅ Deployed as this **Streamlit decision-support app**
-            """
-        )
+    month, day_of_week, hour, is_weekend = get_time_features_from_inputs(pred_date, pred_time)
 
-    st.markdown("---")
-
-    st.subheader("How to Use This App")
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.markdown(
-            """
-            **1. Make Prediction**
-            - Choose a **lot & scenario**
-            - Adjust **time & weather**
-            - See predicted occupancy & full-lot risk
-            """
-        )
-
-    with col2:
-        st.markdown(
-            """
-            **2. Lot Status Overview**
-            - Select a **single hour**
-            - Compare **all lots**
-            - Status: 🟥 High risk full, 🟧 Busy, 🟩 Comfortable
-            - Supports operational decisions & signage
-            """
-        )
-
-    with col3:
-        st.markdown(
-            """
-            **3. XAI – Explainable AI**
-            - Global **SHAP** feature importance
-            - **Partial Dependence Plots** (Hour, Month, Temp)
-            - **Residual plot** to check model fit
-            - Helps justify decisions to stakeholders
-            """
-        )
-
-    st.info(
-        "Tip: move between pages using the left sidebar. Start with "
-        "**Make Prediction** to see how the model behaves for different scenarios."
-    )
-
-# ---------------------------------------------------
-# PAGE 2 – MAKE PREDICTION (NO FUTURE GRAPH)
-# ---------------------------------------------------
-if page == "Make Prediction":
-    st.title("🎯 Interactive Parking Demand Prediction")
-
-    st.markdown(
-        """
-        Use this page to explore *what-if* scenarios for a single Banff parking lot.
-
-        1. Select a **parking lot**
-        2. Choose a **scenario** (or adjust the sliders)
-        3. See:
-           - Predicted **occupancy** for the selected hour
-           - **Probability** the lot is near full
-        """
-    )
-
-    # Find lot indicator features (one-hot encoded units)
+    # Lot selection
     lot_features = [f for f in FEATURES if f.startswith("Unit_")]
     lot_display_names = [lf.replace("Unit_", "").replace("_", " ") for lf in lot_features]
 
-    # Sort lot list alphabetically so numbers appear in order (BANFF02, BANFF03, …)
     if lot_features:
         lot_pairs = sorted(zip(lot_features, lot_display_names), key=lambda x: x[1])
         lot_features, lot_display_names = zip(*lot_pairs)
         lot_features = list(lot_features)
         lot_display_names = list(lot_display_names)
 
-    if not lot_features:
-        st.warning(
-            "No parking-lot indicator features (starting with 'Unit_') were "
-            "found in FEATURES. Lot selection is disabled; generic features only."
-        )
+    st.markdown("")
+    col_l1, col_l2 = st.columns([1.2, 1])
 
-    # Scenario presets
-    scenario_options = {
-        "Custom (use sliders below)": None,
-        "Sunny Weekend Midday": {"month": 7, "dow": 5, "hour": 13,
-                                 "max_temp": 24.0, "precip": 0.0, "gust": 10.0},
-        "Rainy Weekday Afternoon": {"month": 6, "dow": 2, "hour": 16,
-                                    "max_temp": 15.0, "precip": 5.0, "gust": 20.0},
-        "Cold Morning (Shoulder Season)": {"month": 5, "dow": 1, "hour": 9,
-                                           "max_temp": 5.0, "precip": 0.0, "gust": 15.0},
-        "Warm Evening (Busy Day)": {"month": 8, "dow": 6, "hour": 19,
-                                    "max_temp": 22.0, "precip": 0.0, "gust": 8.0},
-    }
-
-    st.subheader("Step 1 – Choose Lot & Scenario")
-
-    col_lot, col_scenario = st.columns([1.2, 1])
-
-    with col_lot:
+    with col_l1:
         if lot_features:
-            selected_lot_label = st.selectbox(
-                "Select parking lot",
-                lot_display_names,
-                index=0
-            )
+            selected_lot_label = st.selectbox("Parking lot", lot_display_names, index=0)
             selected_lot_feature = lot_features[lot_display_names.index(selected_lot_label)]
         else:
             selected_lot_label = None
             selected_lot_feature = None
+            st.warning("No features starting with 'Unit_' found – lot selection disabled.")
 
-    with col_scenario:
-        selected_scenario = st.selectbox(
-            "Scenario",
-            list(scenario_options.keys()),
-            index=1
+    with col_l2:
+        st.markdown(
+            """
+            <div class="card">
+                <div class="section-title">Tip</div>
+                <div>Pick a date, time, lot and weather, then click <b>Predict</b>.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
-    # Default slider values – will be overwritten by scenario if chosen
-    default_vals = {"month": 7, "dow": 5, "hour": 13,
-                    "max_temp": 22.0, "precip": 0.5, "gust": 12.0}
-
-    if scenario_options[selected_scenario] is not None:
-        default_vals.update(scenario_options[selected_scenario])
-
-    st.subheader("Step 2 – Adjust Conditions (if needed)")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        month = st.slider("Month (1 = Jan, 12 = Dec)",
-                          1, 12, int(default_vals["month"]))
-        day_of_week = st.slider("Day of Week (0 = Monday, 6 = Sunday)",
-                                0, 6, int(default_vals["dow"]))
-        hour = st.slider("Hour of Day (0–23)",
-                         0, 23, int(default_vals["hour"]))
-
-    with col2:
-        max_temp = st.slider("Max Temperature (°C)",
-                             -20.0, 40.0, float(default_vals["max_temp"]))
-        total_precip = st.slider("Total Precipitation (mm)",
-                                 0.0, 30.0, float(default_vals["precip"]))
-        wind_gust = st.slider("Speed of Max Gust (km/h)",
-                              0.0, 100.0, float(default_vals["gust"]))
-
-    is_weekend = 1 if day_of_week in [5, 6] else 0
-
-    st.caption(
-        "Lag features (previous-hour occupancy, rolling averages) are set automatically "
-        "by the model and are not entered manually here."
-    )
-
-    # Build feature dict starting from all zeros
+    # Build feature dict
     base_input = {f: 0 for f in FEATURES}
-
-    # Time & weather
     if "Month" in base_input:
         base_input["Month"] = month
     if "DayOfWeek" in base_input:
@@ -378,64 +343,52 @@ if page == "Make Prediction":
     if "Spd of Max Gust (km/h)" in base_input:
         base_input["Spd of Max Gust (km/h)"] = wind_gust
 
-    # Lot indicator – one-hot
     if selected_lot_feature is not None and selected_lot_feature in base_input:
         base_input[selected_lot_feature] = 1
 
-    # Vector in the exact training feature order
     x_vec = np.array([base_input[f] for f in FEATURES]).reshape(1, -1)
     x_scaled = scaler.transform(x_vec)
 
-    if st.button("🔮 Predict for this scenario"):
-        # Current-hour predictions
+    st.markdown("")
+    if st.button("🔮 Predict"):
         occ_pred = best_xgb_reg.predict(x_scaled)[0]
         full_prob = best_xgb_cls.predict_proba(x_scaled)[0, 1]
 
-        st.subheader("Step 3 – Results for Selected Hour")
-
-        col_res1, col_res2 = st.columns(2)
-        with col_res1:
-            st.metric("Predicted occupancy (model units)",
-                      f"{occ_pred:.2f}")
-        with col_res2:
-            st.metric("Probability lot is near full",
-                      f"{full_prob:.1%}")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.metric("Predicted occupancy (model units)", f"{occ_pred:.2f}")
+        with c2:
+            st.metric("Full-lot probability", f"{full_prob:.1%}")
 
         if full_prob > 0.7:
-            st.warning(
-                "⚠️ High risk this lot will be full. Consider redirecting drivers "
-                "to other parking areas or adjusting signage."
-            )
+            st.warning("High risk this lot will be full.")
         elif full_prob > 0.4:
-            st.info(
-                "Moderate risk of heavy usage. Monitoring and dynamic guidance "
-                "could be useful."
-            )
+            st.info("Medium risk – expect busy conditions.")
         else:
-            st.success(
-                "Low risk of the lot being at full capacity for this hour."
-            )
+            st.success("Low risk of the lot being full.")
 
 # ---------------------------------------------------
-# PAGE 3 – LOT STATUS OVERVIEW (ALL LOTS AT ONCE)
+# TAB 3 – LOT STATUS OVERVIEW
 # ---------------------------------------------------
-if page == "Lot Status Overview":
-    st.title("📊 Lot Status Overview – Which Lots Are Likely Full?")
+with tab_lots:
+    st.markdown("### Compare lots at one moment")
 
-    st.markdown(
-        """
-        This page shows, for a selected hour and conditions, the predicted:
+    col_left, col_right = st.columns([1.2, 1])
 
-        - **Occupancy** for each parking lot
-        - **Probability that the lot is near full**
-        - Simple status: 🟥 High risk, 🟧 Busy, 🟩 Comfortable
-        """
-    )
+    with col_left:
+        lots_date = st.date_input("Date for status", value=date.today(), key="lots_date")
+        lots_time = st.time_input("Time for status", value=time(14, 0), key="lots_time")
+
+    with col_right:
+        max_temp = st.slider("Max temp (°C)", -20.0, 40.0, 22.0, key="lots_temp")
+        total_precip = st.slider("Total precip (mm)", 0.0, 30.0, 0.5, key="lots_precip")
+        wind_gust = st.slider("Max gust (km/h)", 0.0, 100.0, 12.0, key="lots_gust")
+
+    month, day_of_week, hour, is_weekend = get_time_features_from_inputs(lots_date, lots_time)
 
     lot_features = [f for f in FEATURES if f.startswith("Unit_")]
     lot_display_names = [lf.replace("Unit_", "").replace("_", " ") for lf in lot_features]
 
-    # sort lots alphabetically so numbers are in sequence
     if lot_features:
         lot_pairs = sorted(zip(lot_features, lot_display_names), key=lambda x: x[1])
         lot_features, lot_display_names = zip(*lot_pairs)
@@ -443,55 +396,26 @@ if page == "Lot Status Overview":
         lot_display_names = list(lot_display_names)
 
     if not lot_features:
-        st.error(
-            "No parking-lot indicator features (starting with 'Unit_') were "
-            "found in FEATURES. This view needs those to work."
-        )
+        st.error("No features with prefix 'Unit_' in FEATURES. Cannot show lot overview.")
     else:
-        st.subheader("Step 1 – Choose time & weather")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            month = st.slider("Month (1 = Jan, 12 = Dec)", 1, 12, 7)
-            day_of_week = st.slider("Day of Week (0 = Monday, 6 = Sunday)", 0, 6, 5)
-            hour = st.slider("Hour of Day", 0, 23, 14)
-
-        with col2:
-            max_temp = st.slider("Max Temperature (°C)", -20.0, 40.0, 22.0)
-            total_precip = st.slider("Total Precipitation (mm)", 0.0, 30.0, 0.5)
-            wind_gust = st.slider("Speed of Max Gust (km/h)", 0.0, 100.0, 12.0)
-
-        is_weekend = 1 if day_of_week in [5, 6] else 0
-
-        st.caption(
-            "Lag features (previous-hour occupancy, rolling averages) are set to 0 "
-            "for this overview. In a real system they would come from live feeds."
-        )
+        base_input = {f: 0 for f in FEATURES}
+        if "Month" in base_input:
+            base_input["Month"] = month
+        if "DayOfWeek" in base_input:
+            base_input["DayOfWeek"] = day_of_week
+        if "Hour" in base_input:
+            base_input["Hour"] = hour
+        if "IsWeekend" in base_input:
+            base_input["IsWeekend"] = is_weekend
+        if "Max Temp (°C)" in base_input:
+            base_input["Max Temp (°C)"] = max_temp
+        if "Total Precip (mm)" in base_input:
+            base_input["Total Precip (mm)"] = total_precip
+        if "Spd of Max Gust (km/h)" in base_input:
+            base_input["Spd of Max Gust (km/h)"] = wind_gust
 
         if st.button("Compute lot status"):
             rows = []
-
-            # Base feature template
-            base_input = {f: 0 for f in FEATURES}
-
-            # Common time & weather fields
-            if "Month" in base_input:
-                base_input["Month"] = month
-            if "DayOfWeek" in base_input:
-                base_input["DayOfWeek"] = day_of_week
-            if "Hour" in base_input:
-                base_input["Hour"] = hour
-            if "IsWeekend" in base_input:
-                base_input["IsWeekend"] = is_weekend
-            if "Max Temp (°C)" in base_input:
-                base_input["Max Temp (°C)"] = max_temp
-            if "Total Precip (mm)" in base_input:
-                base_input["Total Precip (mm)"] = total_precip
-            if "Spd of Max Gust (km/h)" in base_input:
-                base_input["Spd of Max Gust (km/h)"] = wind_gust
-
-            # Loop over each lot, one-hot encode, and predict
             for lot_feat, lot_name in zip(lot_features, lot_display_names):
                 lot_input = base_input.copy()
                 if lot_feat in lot_input:
@@ -504,7 +428,7 @@ if page == "Lot Status Overview":
                 full_prob = best_xgb_cls.predict_proba(x_scaled)[0, 1]
 
                 if full_prob > 0.7:
-                    status = "🟥 High risk full"
+                    status = "🟥 High risk"
                 elif full_prob > 0.4:
                     status = "🟧 Busy"
                 else:
@@ -519,102 +443,65 @@ if page == "Lot Status Overview":
                     }
                 )
 
-            df = pd.DataFrame(rows)
-            # sort by lot name so numbers are in sequence
-            df = df.sort_values("Lot")
+            df = pd.DataFrame(rows).sort_values("Lot")
 
-            # ---------- nice colour styling ----------
             def lot_status_row_style(row):
                 if "High risk" in row["Status"]:
-                    return ["background-color: #ffe5e5"] * len(row)  # light red
+                    return ["background-color: #ffe5e5"] * len(row)
                 elif "Busy" in row["Status"]:
-                    return ["background-color: #fff4e0"] * len(row)  # light orange
+                    return ["background-color: #fff4e0"] * len(row)
                 else:
-                    return ["background-color: #e9f7ef"] * len(row)  # light green
+                    return ["background-color: #e9f7ef"] * len(row)
 
             styled_df = (
                 df.style
                 .format(
-                    {"Predicted occupancy": "{:.2f}",
-                     "Probability full": "{:.1%}"}
+                    {"Predicted occupancy": "{:.2f}", "Probability full": "{:.1%}"}
                 )
                 .apply(lot_status_row_style, axis=1)
             )
 
-            st.subheader("Step 2 – Lot status for selected hour")
-            st.dataframe(
-                styled_df,
-                use_container_width=True,
-            )
-
-            st.caption(
-                "Lots are shown in numeric order (BANFF02, BANFF03, …). "
-                "Row colour shows risk level: red = high risk, orange = busy, "
-                "green = comfortable."
-            )
+            st.dataframe(styled_df, use_container_width=True)
+            st.caption("Row colour shows risk level: red = high, orange = busy, green = comfortable.")
 
 # ---------------------------------------------------
-# PAGE 4 – XAI (EXPLAINABLE AI)
+# TAB 4 – XAI
 # ---------------------------------------------------
-if page == "XAI – Explainable AI":
-    st.title("🔍 Explainable AI – Understanding the Models")
+with tab_xai:
+    st.markdown("### Explainable AI views")
 
-    st.markdown(
-        """
-        This page explains **why** the models make their predictions,
-        using Explainable AI tools:
-
-        - **SHAP summary plot**: which features contribute most to predictions
-        - **SHAP bar plot**: overall feature importance
-        - **Partial Dependence Plots (PDPs)**: effect of one feature at a time
-        - **Residual plot**: how close predictions are to the true values
-        """
-    )
-
-    # ---------- SHAP EXPLANATIONS FOR REGRESSION ----------
-    st.subheader("SHAP Summary – Regression Model (Occupancy)")
-
+    # SHAP
+    st.markdown("**SHAP summary (regression)**")
     try:
         explainer_reg = shap.TreeExplainer(best_xgb_reg)
         shap_values_reg = explainer_reg.shap_values(X_test_scaled)
 
-        # Summary dot plot
         fig1, ax1 = plt.subplots()
         shap.summary_plot(
             shap_values_reg,
             X_test_scaled,
             feature_names=FEATURES,
-            show=False
+            show=False,
         )
         st.pyplot(fig1)
-        st.caption(
-            "Each point represents a sample. Colour shows feature value, and position "
-            "shows how much that feature pushed the prediction up or down."
-        )
 
-        # Summary bar plot
-        st.subheader("SHAP Feature Importance – Regression")
+        st.markdown("**Feature importance (bar)**")
         fig2, ax2 = plt.subplots()
         shap.summary_plot(
             shap_values_reg,
             X_test_scaled,
             feature_names=FEATURES,
             plot_type="bar",
-            show=False
+            show=False,
         )
         st.pyplot(fig2)
     except Exception as e:
         st.error(f"Could not generate SHAP plots: {e}")
 
-    # ---------- PARTIAL DEPENDENCE PLOTS ----------
-    st.subheader("Partial Dependence – Key Features")
-
-    pd_feature_names = []
-    for name in ["Max Temp (°C)", "Month", "Hour"]:
-        if name in FEATURES:
-            pd_feature_names.append(name)
-
-    if len(pd_feature_names) > 0:
+    # PDP
+    st.markdown("**Partial dependence plots**")
+    pd_feature_names = [name for name in ["Max Temp (°C)", "Month", "Hour"] if name in FEATURES]
+    if pd_feature_names:
         feature_indices = [FEATURES.index(f) for f in pd_feature_names]
         fig3, ax3 = plt.subplots(figsize=(10, 4))
         PartialDependenceDisplay.from_estimator(
@@ -622,22 +509,14 @@ if page == "XAI – Explainable AI":
             X_test_scaled,
             feature_indices,
             feature_names=FEATURES,
-            ax=ax3
+            ax=ax3,
         )
         st.pyplot(fig3)
-        st.caption(
-            "Partial dependence shows the average effect of each feature on predicted "
-            "occupancy while holding other features constant."
-        )
     else:
-        st.info(
-            "Could not find the configured PDP features ('Max Temp (°C)', 'Month', 'Hour') "
-            "in the FEATURES list. You may need to adjust the feature names."
-        )
+        st.info("Configured PDP features not found in FEATURES; adjust names if needed.")
 
-    # ---------- RESIDUAL ANALYSIS ----------
-    st.subheader("Residual Plot – Regression Model")
-
+    # Residuals
+    st.markdown("**Residual plot**")
     try:
         y_pred = best_xgb_reg.predict(X_test_scaled)
         residuals = y_reg_test - y_pred
@@ -645,66 +524,49 @@ if page == "XAI – Explainable AI":
         fig4, ax4 = plt.subplots()
         ax4.scatter(y_pred, residuals, alpha=0.3)
         ax4.axhline(0, color="red", linestyle="--")
-        ax4.set_xlabel("Predicted Occupancy")
-        ax4.set_ylabel("Residual (Actual - Predicted)")
+        ax4.set_xlabel("Predicted occupancy")
+        ax4.set_ylabel("Residual (actual − predicted)")
         st.pyplot(fig4)
-        st.caption(
-            "Residuals scattered symmetrically around zero suggest that the model "
-            "captures the main patterns without strong systematic bias."
-        )
     except Exception as e:
         st.error(f"Could not compute residuals: {e}")
 
 # ---------------------------------------------------
-# PAGE 5 – CHAT ASSISTANT (RAG)
+# TAB 5 – CHAT (RAG)
 # ---------------------------------------------------
-if page == "💬 Chat Assistant (RAG)":
-    st.title("💬 Banff Parking Chat Assistant (RAG)")
+with tab_chat:
+    st.markdown("### Banff parking assistant")
 
-    st.markdown(
-        """
-        Ask questions about parking patterns, busy times, or model behaviour.
+    if client is None:
+        st.warning(
+            "Chat is in **offline mode** (no OpenAI API key in environment). "
+            "Answers are generated only from `banff_knowledge.txt`."
+        )
 
-        This chatbot uses **RAG (Retrieval-Augmented Generation)**:
-        1. It first retrieves relevant lines from your `banff_knowledge.txt` file
-        2. Then it uses an OpenAI model to answer, grounded in that context
-        """
-    )
-
-    # Initialize chat history
     if "rag_chat_history" not in st.session_state:
         st.session_state.rag_chat_history = []
 
-    # Show previous messages
     for msg in st.session_state.rag_chat_history:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # User input
-    user_input = st.chat_input("Ask something about Banff parking...")
+    user_input = st.chat_input("Ask something about Banff parking…")
 
     if user_input:
-        # Add user message to history
-        st.session_state.rag_chat_history.append(
-            {"role": "user", "content": user_input}
-        )
+        st.session_state.rag_chat_history.append({"role": "user", "content": user_input})
         with st.chat_message("user"):
             st.markdown(user_input)
 
-        # Assistant response
         with st.chat_message("assistant"):
-            with st.spinner("Thinking with project context..."):
+            with st.spinner("Thinking with project context…"):
                 answer = generate_chat_answer(
                     user_input,
                     st.session_state.rag_chat_history,
                 )
                 st.markdown(answer)
 
-        st.session_state.rag_chat_history.append(
-            {"role": "assistant", "content": answer}
-        )
+        st.session_state.rag_chat_history.append({"role": "assistant", "content": answer})
 
     st.caption(
-        "Tip: edit `banff_knowledge.txt` in your repo to control what the chatbot knows "
+        "Edit `banff_knowledge.txt` in your repo to control what the chatbot knows "
         "about your EDA, feature engineering, and model findings."
     )
