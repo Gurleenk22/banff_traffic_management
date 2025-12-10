@@ -23,15 +23,22 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-        /* pastel background with soft prints */
+        /* Overall pastel gradient background with soft "prints" */
         .main {
-            background: radial-gradient(circle at 0% 0%, #ffe9fb 0, #f5f7ff 30%, #e3fbff 60%, #fdf6ff 100%);
+            background: linear-gradient(
+                135deg,
+                #ffe6f7 0%,
+                #f0f4ff 35%,
+                #e7fff6 70%,
+                #fff7e6 100%
+            );
         }
 
+        /* Center container for the home page */
         .pf-container-center {
             max-width: 900px;
             margin: 0 auto;
-            padding: 3rem 0 3.5rem 0;
+            padding: 3.5rem 0 3.5rem 0;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -40,56 +47,70 @@ st.markdown(
         .pf-title {
             text-align: center;
             letter-spacing: 0.32em;
-            font-size: 2.9rem;
+            font-size: 3.1rem;
             font-weight: 800;
             color: #020617;
-            margin-bottom: 0.5rem;
+            margin-bottom: 0.6rem;
         }
 
         .pf-subtitle {
             text-align: center;
-            font-size: 1rem;
-            color: #4b5563;
-            max-width: 520px;
-            margin-bottom: 1.8rem;
-        }
-
-        .pf-hero-home {
-            background: linear-gradient(120deg, rgba(255,255,255,0.92), rgba(255,255,255,0.82));
-            border-radius: 1.6rem;
-            padding: 1.2rem 1.6rem;
-            box-shadow: 0 24px 48px rgba(148,163,184,0.35);
-            border: 1px solid rgba(148,163,184,0.3);
-            margin-bottom: 2.2rem;
-            text-align: center;
-            font-size: 0.95rem;
+            font-size: 1.02rem;
             color: #374151;
+            max-width: 540px;
+            margin-bottom: 2.0rem;
         }
 
+        /* Glassy hero card */
+        .pf-hero-home {
+            background: linear-gradient(
+                120deg,
+                rgba(255,255,255,0.96),
+                rgba(255,255,255,0.88)
+            );
+            border-radius: 1.8rem;
+            padding: 1.3rem 1.7rem;
+            box-shadow: 0 24px 55px rgba(148,163,184,0.42);
+            border: 1px solid rgba(148,163,184,0.28);
+            margin-bottom: 2.4rem;
+            text-align: center;
+            font-size: 0.96rem;
+            color: #4b5563;
+        }
+
+        /* Vertical button stack on home page */
         .pf-menu-stack {
             width: 100%;
-            max-width: 360px;
+            max-width: 420px;
             display: flex;
             flex-direction: column;
-            gap: 0.55rem;
+            gap: 0.75rem;
         }
 
         .pf-menu-stack button {
             border-radius: 999px !important;
             border: 1px solid rgba(148,163,184,0.6) !important;
-            background: rgba(248,250,252,0.98) !important;
+            background: linear-gradient(
+                90deg,
+                rgba(255,255,255,0.96),
+                rgba(240,249,255,0.96)
+            ) !important;
             color: #0f172a !important;
-            font-size: 0.95rem !important;
-            padding: 0.65rem 1rem !important;
-            box-shadow: 0 14px 30px rgba(148,163,184,0.3);
+            font-size: 0.96rem !important;
+            padding: 0.7rem 1rem !important;
+            box-shadow: 0 16px 40px rgba(148,163,184,0.35);
         }
 
         .pf-menu-stack button:hover {
             border-color: #fb7185 !important;
-            background: linear-gradient(90deg, #fee2ff, #e0f2fe) !important;
+            background: linear-gradient(
+                90deg,
+                #ffe4f1,
+                #e0f2fe
+            ) !important;
         }
 
-        /* section containers for inner pages */
+        /* Containers & headers for inner pages */
         .pf-container {
             max-width: 1050px;
             margin: 0 auto;
@@ -100,10 +121,11 @@ st.markdown(
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 0.8rem;
+            margin-bottom: 0.6rem;
         }
+
         .pf-section-title {
-            font-size: 1.4rem;
+            font-size: 1.45rem;
             font-weight: 700;
             color: #0f172a;
         }
@@ -154,7 +176,7 @@ def load_dashboard_data():
     return None
 
 # ================
-# AUTO WEATHER (CSV + seasonal, works for minus temps)
+# AUTO WEATHER (CSV + seasonal, supports minus temps)
 # ================
 SEASONAL_DEFAULTS = {
     1: (-8.0, 2.0, 18.0),
@@ -278,7 +300,7 @@ def go(page_name: str):
     st.rerun()
 
 # ====================
-# HOME PAGE (CLEAN LANDING)
+# HOME PAGE (PASTEL + GLASSY)
 # ====================
 def render_home():
     st.markdown('<div class="pf-container-center">', unsafe_allow_html=True)
@@ -299,7 +321,6 @@ def render_home():
         unsafe_allow_html=True,
     )
 
-    # vertical button stack
     with st.container():
         st.markdown('<div class="pf-menu-stack">', unsafe_allow_html=True)
 
