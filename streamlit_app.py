@@ -41,7 +41,7 @@ st.markdown(
             padding: 1rem 1.25rem;
             border-radius: 1rem;
             background-color: white;
-            box-shadow: 0 1px 4px rgba(15, 23, 42, 0.09);
+            box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
         }
         .section-title {
             font-weight: 600;
@@ -77,17 +77,18 @@ def load_models_and_data():
 
 best_xgb_reg, best_xgb_cls, scaler, FEATURES, X_test_scaled, y_reg_test = load_models_and_data()
 
-# ===== Optional CSV for dashboard =====
-DASHBOARD_CSV = "banff_dashboard.csv"
+# ===== CSV for dashboard =====
+DASHBOARD_CSV = "banff_parking_engineered_HOURLY (1).csv"
 
 
 @st.cache_data
 def load_dashboard_data():
     if os.path.exists(DASHBOARD_CSV):
-        try:
-            return pd.read_csv(DASHBOARD_CSV)
-        except Exception:
-            return None
+        df = pd.read_csv(DASHBOARD_CSV)
+        df["Timestamp"] = pd.to_datetime(df["Timestamp"])
+        df["Date"] = df["Timestamp"].dt.date
+        df["Hour"] = df["Timestamp"].dt.hour
+        return df
     return None
 
 # ---------------------------------------------------
@@ -173,6 +174,16 @@ def generate_chat_answer(user_question, chat_history):
         )
 
 # ---------------------------------------------------
+# SMALL HELPERS
+# ---------------------------------------------------
+def get_time_features_from_inputs(selected_date: date, selected_time: time):
+    month = selected_date.month
+    day_of_week = selected_date.weekday()  # 0=Monday
+    hour = selected_time.hour
+    is_weekend = 1 if day_of_week in [5, 6] else 0
+    return month, day_of_week, hour, is_weekend
+
+# ---------------------------------------------------
 # TOP HEADER
 # ---------------------------------------------------
 st.markdown('<div class="app-header">Banff Parking Dashboard</div>', unsafe_allow_html=True)
@@ -189,18 +200,59 @@ tab_overview, tab_predict, tab_lots, tab_xai, tab_chat = st.tabs(
 )
 
 # ---------------------------------------------------
-# TAB 1 – OVERVIEW + SIMPLE DASHBOARD
+# TAB 1 – OVERVIEW + DASHBOARD FROM CSV
 # ---------------------------------------------------
 with tab_overview:
+    df_dash = load_dashboard_data()
+
     col_top_left, col_top_right = st.columns([2, 1])
 
     with col_top_left:
-        st.markdown("### Dashboard snapshot")
-        st.caption("High-level view of current parking behaviour.")
+        st.markdown("### Snapshot")
+
+        if df_dash is not None:
+            total_lots = df_dash["Unit"].nunique()
+            total_rows = len(df_dash)
+            date_min = df_dash["Date"].min()
+            date_max = df_dash["Date"].max()
+
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.markdown(
+                    f"""
+                    <div class="card">
+                        <div class="section-title">Lots</div>
+                        <div>{total_lots}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            with c2:
+                st.markdown(
+                    f"""
+                    <div class="card">
+                        <div class="section-title">Records</div>
+                        <div>{total_rows}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            with c3:
+                st.markdown(
+                    f"""
+                    <div class="card">
+                        <div class="section-title">Date range</div>
+                        <div>{date_min} → {date_max}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.info("CSV file not found – dashboard will show once the file is in the app folder.")
 
     with col_top_right:
         today = date.today()
-        selected_date = st.date_input("Date", value=today, label_visibility="collapsed")
+        selected_date = st.date_input("Date", value=today)
 
         st.markdown(
             f"""
@@ -214,82 +266,68 @@ with tab_overview:
 
     st.markdown("")
 
-    # KPI cards row
-    kpi1, kpi2, kpi3 = st.columns(3)
-    with kpi1:
-        st.markdown(
-            """
-            <div class="card">
-                <div class="section-title">Model targets</div>
-                <div>Hourly occupancy & full-lot risk</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with kpi2:
-        st.markdown(
-            """
-            <div class="card">
-                <div class="section-title">Season focus</div>
-                <div>May – September (tourist season)</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with kpi3:
-        st.markdown(
-            """
-            <div class="card">
-                <div class="section-title">Lots modelled</div>
-                <div>Multiple Banff units</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+    if df_dash is not None:
+        day_df = df_dash[df_dash["Date"] == selected_date]
 
-    st.markdown("")
-    st.markdown("### CSV overview")
+        if day_df.empty:
+            st.info("No data for this date in the CSV.")
+        else:
+            # Lot filter
+            lots = sorted(day_df["Unit"].unique())
+            lot_choice = st.selectbox("Lot filter", ["All lots"] + lots)
 
-    df_dash = load_dashboard_data()
-    if df_dash is None:
-        st.info(
-            f"Place a CSV named **{DASHBOARD_CSV}** in the app folder to feed this dashboard "
-            "with real metrics (e.g., daily occupancy, arrivals, departures)."
-        )
-    else:
-        # show a quick summary of the CSV
-        st.dataframe(df_dash.head(), use_container_width=True)
-        st.caption("Preview of your CSV. You can customise charts here if needed.")
+            if lot_choice != "All lots":
+                day_df = day_df[day_df["Unit"] == lot_choice]
+
+            # KPIs
+            avg_occ = day_df["Percent_Occupancy"].mean()
+            peak_occ = day_df["Percent_Occupancy"].max()
+            full_hours = int(day_df["Is_Full"].sum())
+
+            k1, k2, k3, k4 = st.columns(4)
+            with k1:
+                st.metric("Avg % occupancy", f"{avg_occ:.1f}%")
+            with k2:
+                st.metric("Peak % occupancy", f"{peak_occ:.1f}%")
+            with k3:
+                st.metric("Hours near full", f"{full_hours}")
+            with k4:
+                st.metric("Rows", f"{len(day_df)}")
+
+            # Hourly line chart
+            hourly = (
+                day_df.groupby("Hour")["Percent_Occupancy"]
+                .mean()
+                .sort_index()
+            )
+
+            fig, ax = plt.subplots()
+            ax.plot(hourly.index, hourly.values, marker="o")
+            ax.set_xlabel("Hour of day")
+            ax.set_ylabel("Avg % occupancy")
+            ax.set_xticks(list(hourly.index))
+            st.pyplot(fig)
+
+            st.caption("Average occupancy by hour for the selected date and lot filter.")
 
 # ---------------------------------------------------
-# Helper: convert calendar date/time -> model inputs
-# ---------------------------------------------------
-def get_time_features_from_inputs(selected_date: date, selected_time: time):
-    month = selected_date.month
-    day_of_week = selected_date.weekday()  # 0=Monday
-    hour = selected_time.hour
-    is_weekend = 1 if day_of_week in [5, 6] else 0
-    return month, day_of_week, hour, is_weekend
-
-# ---------------------------------------------------
-# TAB 2 – PREDICTION (calendar instead of sliders)
+# TAB 2 – PREDICTION (calendar + time input)
 # ---------------------------------------------------
 with tab_predict:
     st.markdown("### Scenario prediction")
 
     col_left, col_right = st.columns([1.2, 1])
 
-    # date + time pickers
     with col_left:
         st.markdown("**When?**")
-        pred_date = st.date_input("Prediction date", value=date.today())
-        pred_time = st.time_input("Prediction time", value=time(13, 0))
+        pred_date = st.date_input("Prediction date", value=date.today(), key="pred_date")
+        pred_time = st.time_input("Prediction time", value=time(13, 0), key="pred_time")
 
     with col_right:
         st.markdown("**Weather**")
-        max_temp = st.slider("Max temp (°C)", -20.0, 40.0, 22.0)
-        total_precip = st.slider("Total precip (mm)", 0.0, 30.0, 0.5)
-        wind_gust = st.slider("Max gust (km/h)", 0.0, 100.0, 12.0)
+        max_temp = st.slider("Max temp (°C)", -20.0, 40.0, 22.0, key="pred_temp")
+        total_precip = st.slider("Total precip (mm)", 0.0, 30.0, 0.5, key="pred_precip")
+        wind_gust = st.slider("Max gust (km/h)", 0.0, 100.0, 12.0, key="pred_gust")
 
     month, day_of_week, hour, is_weekend = get_time_features_from_inputs(pred_date, pred_time)
 
@@ -350,13 +388,13 @@ with tab_predict:
     x_scaled = scaler.transform(x_vec)
 
     st.markdown("")
-    if st.button("🔮 Predict"):
+    if st.button("🔮 Predict", key="predict_button"):
         occ_pred = best_xgb_reg.predict(x_scaled)[0]
         full_prob = best_xgb_cls.predict_proba(x_scaled)[0, 1]
 
         c1, c2 = st.columns(2)
         with c1:
-            st.metric("Predicted occupancy (model units)", f"{occ_pred:.2f}")
+            st.metric("Predicted occupancy", f"{occ_pred:.2f}")
         with c2:
             st.metric("Full-lot probability", f"{full_prob:.1%}")
 
@@ -414,7 +452,7 @@ with tab_lots:
         if "Spd of Max Gust (km/h)" in base_input:
             base_input["Spd of Max Gust (km/h)"] = wind_gust
 
-        if st.button("Compute lot status"):
+        if st.button("Compute lot status", key="lots_button"):
             rows = []
             for lot_feat, lot_name in zip(lot_features, lot_display_names):
                 lot_input = base_input.copy()
