@@ -286,7 +286,8 @@ if "view" not in st.session_state:
 
 def go(view_name: str):
     st.session_state.view = view_name
-    st.experimental_rerun()
+    # ✅ modern Streamlit rerun
+    st.rerun()
 
 # ---------------------------------------------------
 # HOME PAGE
