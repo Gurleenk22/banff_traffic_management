@@ -14,38 +14,112 @@ import os
 from datetime import datetime, time, date
 
 # ---------------------------------------------------
-# BASIC PAGE CONFIG + LIGHT CSS
+# BASIC PAGE CONFIG + GLASSY CSS
 # ---------------------------------------------------
 st.set_page_config(
-    page_title="Banff Parking – ML & XAI Dashboard",
+    page_title="Path Finders – Banff Parking",
     layout="wide"
 )
 
 st.markdown(
     """
     <style>
-        .main {
-            background-color: #f5f5f7;
+        /* background */
+        .stApp {
+            background: radial-gradient(circle at top left, #1e293b 0, #020617 45%, #020617 100%);
+            color: #e5e7eb;
         }
+        .block-container {
+            padding-top: 1.2rem;
+        }
+
         .app-header {
-            font-size: 1.8rem;
-            font-weight: 700;
-            margin-bottom: 0.1rem;
+            font-size: 2.0rem;
+            font-weight: 800;
+            letter-spacing: 0.03em;
         }
         .app-subtitle {
-            color: #6b7280;
+            color: #9ca3af;
             font-size: 0.95rem;
-            margin-bottom: 1rem;
+            margin-top: 0.2rem;
         }
-        .card {
+
+        .hero {
+            display: flex;
+            gap: 1.5rem;
+            align-items: center;
+            margin-bottom: 1.2rem;
+        }
+        .hero-left {
+            flex: 2;
+        }
+        .hero-right {
+            flex: 1;
+            display: flex;
+            justify-content: flex-end;
+        }
+        .hero-pill-row {
+            margin-top: 0.6rem;
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        .hero-pill {
+            padding: 0.3rem 0.7rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid rgba(148, 163, 184, 0.3);
+        }
+        .hero-highlight {
+            padding: 0.9rem 1.1rem;
+            border-radius: 1rem;
+            background: linear-gradient(135deg, rgba(59,130,246,0.18), rgba(16,185,129,0.16));
+            border: 1px solid rgba(148, 163, 184, 0.4);
+            font-size: 0.85rem;
+        }
+
+        .glass-card {
             padding: 1rem 1.25rem;
             border-radius: 1rem;
-            background-color: white;
-            box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+            background: rgba(15, 23, 42, 0.72);
+            border: 1px solid rgba(148, 163, 184, 0.45);
+            box-shadow: 0 18px 40px rgba(15, 23, 42, 0.45);
+            backdrop-filter: blur(18px);
+        }
+        .card {
+            padding: 0.9rem 1rem;
+            border-radius: 0.9rem;
+            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid rgba(148, 163, 184, 0.4);
+            backdrop-filter: blur(18px);
         }
         .section-title {
             font-weight: 600;
-            margin-bottom: 0.4rem;
+            margin-bottom: 0.25rem;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: #9ca3af;
+        }
+
+        /* make metrics look a bit glassy */
+        .stMetric {
+            background: rgba(15, 23, 42, 0.8);
+            border-radius: 0.9rem;
+            padding: 0.6rem 0.8rem;
+            border: 1px solid rgba(148, 163, 184, 0.4);
+        }
+
+        /* tab labels a bit bolder */
+        button[role="tab"] {
+            border-radius: 999px !important;
+            padding: 0.35rem 1rem !important;
+            border: 1px solid transparent !important;
+        }
+        button[role="tab"][aria-selected="true"] {
+            background: linear-gradient(135deg, #22c55e, #3b82f6);
+            color: white !important;
         }
     </style>
     """,
@@ -184,11 +258,29 @@ def get_time_features_from_inputs(selected_date: date, selected_time: time):
     return month, day_of_week, hour, is_weekend
 
 # ---------------------------------------------------
-# TOP HEADER
+# TOP HERO HEADER
 # ---------------------------------------------------
-st.markdown('<div class="app-header">Banff Parking Dashboard</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="app-subtitle">Quick insights, predictions, and explainability for Banff lots.</div>',
+    """
+    <div class="hero">
+      <div class="hero-left">
+        <div class="app-header">Path Finders</div>
+        <div class="app-subtitle">Smart parking insights for Banff townsite.</div>
+        <div class="hero-pill-row">
+          <div class="hero-pill">🚗 Parking demand</div>
+          <div class="hero-pill">📊 Lot comparison</div>
+          <div class="hero-pill">🔍 Explainable AI</div>
+          <div class="hero-pill">💬 RAG assistant</div>
+        </div>
+      </div>
+      <div class="hero-right">
+        <div class="hero-highlight">
+          <b>Live scenario sandbox</b><br/>
+          Pick a date, time and lot → get instant occupancy prediction.
+        </div>
+      </div>
+    </div>
+    """,
     unsafe_allow_html=True,
 )
 
@@ -208,7 +300,7 @@ with tab_overview:
     col_top_left, col_top_right = st.columns([2, 1])
 
     with col_top_left:
-        st.markdown("### Snapshot")
+        st.markdown("#### Snapshot")
 
         if df_dash is not None:
             total_lots = df_dash["Unit"].nunique()
@@ -222,7 +314,7 @@ with tab_overview:
                     f"""
                     <div class="card">
                         <div class="section-title">Lots</div>
-                        <div>{total_lots}</div>
+                        <div style="font-size:1.4rem;">{total_lots}</div>
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -232,7 +324,7 @@ with tab_overview:
                     f"""
                     <div class="card">
                         <div class="section-title">Records</div>
-                        <div>{total_rows}</div>
+                        <div style="font-size:1.4rem;">{total_rows}</div>
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -242,7 +334,7 @@ with tab_overview:
                     f"""
                     <div class="card">
                         <div class="section-title">Date range</div>
-                        <div>{date_min} → {date_max}</div>
+                        <div style="font-size:0.9rem;">{date_min} →<br/>{date_max}</div>
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -256,9 +348,14 @@ with tab_overview:
 
         st.markdown(
             f"""
-            <div class="card">
+            <div class="glass-card">
                 <div class="section-title">Selected date</div>
-                <div>{selected_date.strftime('%b %d, %Y')} ({selected_date.strftime('%A')})</div>
+                <div style="font-size:1.1rem;">
+                    {selected_date.strftime('%b %d, %Y')}
+                </div>
+                <div style="color:#9ca3af;font-size:0.85rem;">
+                    {selected_date.strftime('%A')}
+                </div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -272,7 +369,6 @@ with tab_overview:
         if day_df.empty:
             st.info("No data for this date in the CSV.")
         else:
-            # Lot filter
             lots = sorted(day_df["Unit"].unique())
             lot_choice = st.selectbox("Lot filter", ["All lots"] + lots)
 
@@ -294,18 +390,19 @@ with tab_overview:
             with k4:
                 st.metric("Rows", f"{len(day_df)}")
 
-            # Hourly line chart
+            # Hourly line chart – smaller height
             hourly = (
                 day_df.groupby("Hour")["Percent_Occupancy"]
                 .mean()
                 .sort_index()
             )
 
-            fig, ax = plt.subplots()
+            fig, ax = plt.subplots(figsize=(6, 3))
             ax.plot(hourly.index, hourly.values, marker="o")
             ax.set_xlabel("Hour of day")
             ax.set_ylabel("Avg % occupancy")
             ax.set_xticks(list(hourly.index))
+            fig.tight_layout()
             st.pyplot(fig)
 
             st.caption("Average occupancy by hour for the selected date and lot filter.")
@@ -314,7 +411,7 @@ with tab_overview:
 # TAB 2 – PREDICTION (calendar + time input)
 # ---------------------------------------------------
 with tab_predict:
-    st.markdown("### Scenario prediction")
+    st.markdown("#### Scenario prediction")
 
     col_left, col_right = st.columns([1.2, 1])
 
@@ -409,7 +506,7 @@ with tab_predict:
 # TAB 3 – LOT STATUS OVERVIEW
 # ---------------------------------------------------
 with tab_lots:
-    st.markdown("### Compare lots at one moment")
+    st.markdown("#### Compare lots at one moment")
 
     col_left, col_right = st.columns([1.2, 1])
 
@@ -485,11 +582,11 @@ with tab_lots:
 
             def lot_status_row_style(row):
                 if "High risk" in row["Status"]:
-                    return ["background-color: #ffe5e5"] * len(row)
+                    return ["background-color: #451a1a"] * len(row)
                 elif "Busy" in row["Status"]:
-                    return ["background-color: #fff4e0"] * len(row)
+                    return ["background-color: #422006"] * len(row)
                 else:
-                    return ["background-color: #e9f7ef"] * len(row)
+                    return ["background-color: #064e3b"] * len(row)
 
             styled_df = (
                 df.style
@@ -506,7 +603,7 @@ with tab_lots:
 # TAB 4 – XAI
 # ---------------------------------------------------
 with tab_xai:
-    st.markdown("### Explainable AI views")
+    st.markdown("#### Explainable AI views")
 
     # SHAP
     st.markdown("**SHAP summary (regression)**")
@@ -514,17 +611,18 @@ with tab_xai:
         explainer_reg = shap.TreeExplainer(best_xgb_reg)
         shap_values_reg = explainer_reg.shap_values(X_test_scaled)
 
-        fig1, ax1 = plt.subplots()
         shap.summary_plot(
             shap_values_reg,
             X_test_scaled,
             feature_names=FEATURES,
             show=False,
         )
+        fig1 = plt.gcf()
+        fig1.set_size_inches(7, 3)   # smaller
+        fig1.tight_layout()
         st.pyplot(fig1)
 
         st.markdown("**Feature importance (bar)**")
-        fig2, ax2 = plt.subplots()
         shap.summary_plot(
             shap_values_reg,
             X_test_scaled,
@@ -532,6 +630,9 @@ with tab_xai:
             plot_type="bar",
             show=False,
         )
+        fig2 = plt.gcf()
+        fig2.set_size_inches(7, 3)
+        fig2.tight_layout()
         st.pyplot(fig2)
     except Exception as e:
         st.error(f"Could not generate SHAP plots: {e}")
@@ -541,7 +642,7 @@ with tab_xai:
     pd_feature_names = [name for name in ["Max Temp (°C)", "Month", "Hour"] if name in FEATURES]
     if pd_feature_names:
         feature_indices = [FEATURES.index(f) for f in pd_feature_names]
-        fig3, ax3 = plt.subplots(figsize=(10, 4))
+        fig3, ax3 = plt.subplots(figsize=(7, 3))
         PartialDependenceDisplay.from_estimator(
             best_xgb_reg,
             X_test_scaled,
@@ -549,6 +650,7 @@ with tab_xai:
             feature_names=FEATURES,
             ax=ax3,
         )
+        fig3.tight_layout()
         st.pyplot(fig3)
     else:
         st.info("Configured PDP features not found in FEATURES; adjust names if needed.")
@@ -559,11 +661,12 @@ with tab_xai:
         y_pred = best_xgb_reg.predict(X_test_scaled)
         residuals = y_reg_test - y_pred
 
-        fig4, ax4 = plt.subplots()
+        fig4, ax4 = plt.subplots(figsize=(6, 3))
         ax4.scatter(y_pred, residuals, alpha=0.3)
         ax4.axhline(0, color="red", linestyle="--")
         ax4.set_xlabel("Predicted occupancy")
         ax4.set_ylabel("Residual (actual − predicted)")
+        fig4.tight_layout()
         st.pyplot(fig4)
     except Exception as e:
         st.error(f"Could not compute residuals: {e}")
@@ -572,7 +675,7 @@ with tab_xai:
 # TAB 5 – CHAT (RAG)
 # ---------------------------------------------------
 with tab_chat:
-    st.markdown("### Banff parking assistant")
+    st.markdown("#### Banff parking assistant")
 
     if client is None:
         st.warning(
